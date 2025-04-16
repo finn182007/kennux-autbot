@@ -1,1 +1,522 @@
+const moment = require("moment-timezone");
 
+export const meta = {
+  name: "accept",
+  otherNames: ["acp"],
+  version: "1.0.0",
+  author: "JV Barcenas | Liane Cagara",
+  botAdmin: true,
+  permissions: [2],
+  description: "accept users",
+  category: "Utilities",
+  allowModerators: true,
+  requirement: "3.0.0",
+  noPrefix: false,
+  icon: "💗",
+};
+export const style = {
+  title: "💗 Accept Users",
+  titleFont: "bold",
+  contentFont: "fancy",
+};
+
+/**
+ *
+ * @param {CommandContext} param0
+ * @returns
+ */
+export async function onReply({
+  output: message,
+  repObj: Reply,
+  event,
+  api,
+  input,
+  commandName,
+}) {
+  const { author, listRequest, messageID } = Reply;
+  if (author !== event.senderID) return;
+  const args = event.body.replace(/ +/g, " ").toLowerCase().split(" ");
+
+  clearTimeout(Reply.unsendTimeout);
+  const form = {
+    av: api.getCurrentUserID(),
+    fb_api_caller_class: "RelayModern",
+    variables: {
+      input: {
+        source: "friends_tab",
+        actor_id: api.getCurrentUserID(),
+        client_mutation_id: Math.round(Math.random() * 19).toString(),
+      },
+      scale: 3,
+      refresh_num: 0,
+    },
+  };
+
+  const success = [];
+  const failed = [];
+
+  if (args[0] === "add") {
+    form.fb_api_req_friendly_name =
+      "FriendingCometFriendRequestConfirmMutation";
+    form.doc_id = "3147613905362928";
+  } else if (args[0] === "del") {
+    form.fb_api_req_friendly_name = "FriendingCometFriendRequestDeleteMutation";
+    form.doc_id = "4108254489275063";
+  } else {
+    return message.replyStyled(
+      'Please select <add | del > <target number | or "all">',
+      style
+    );
+  }
+
+  let targetIDs = args.slice(1);
+
+  if (args[1] === "all") {
+    targetIDs = [];
+    const lengthList = listRequest.length;
+    for (let i = 1; i <= lengthList; i++) targetIDs.push(i);
+  }
+
+  const newTargetIDs = [];
+  const promiseFriends = [];
+
+  for (const stt of targetIDs) {
+    const u = listRequest[parseInt(stt) - 1];
+    if (!u) {
+      failed.push(`Can't find stt ${stt} in the list`);
+      continue;
+    }
+    form.variables.input.friend_requester_id = u.node.id;
+    form.variables = JSON.stringify(form.variables);
+    newTargetIDs.push(u);
+    promiseFriends.push(
+      api.httpPost("https://www.facebook.com/api/graphql/", form)
+    );
+    form.variables = JSON.parse(form.variables);
+  }
+
+  const lengthTarget = newTargetIDs.length;
+  for (let i = 0; i < lengthTarget; i++) {
+    try {
+      const friendRequest = await promiseFriends[i];
+      if (JSON.parse(friendRequest).errors) {
+        failed.push(newTargetIDs[i].node.name);
+      } else {
+        success.push(newTargetIDs[i].node.name);
+      }
+    } catch (e) {
+      failed.push(newTargetIDs[i].node.name);
+    }
+  }
+
+  if (success.length > 0) {
+    message.replyStyled(
+      `» The ${
+        args[0] === "add" ? "friend request" : "friend request deletion"
+      } has been processed for ${success.length} people:\n\n${success.join(
+        "\n"
+      )}${
+        failed.length > 0
+          ? `\n» The following ${
+              failed.length
+            } people encountered errors: ${failed.join("\n")}`
+          : ""
+      }`,
+      style
+    );
+  } else {
+    api.unsendMessage(messageID);
+    return message.replyStyled(
+      "Invalid response. Please provide a valid response.",
+      style
+    );
+  }
+
+  api.unsendMessage(messageID);
+}
+/**
+ *
+ * @param {CommandContext} param0
+ */
+export async function entry({ event, api, commandName, output, input }) {
+  const form = {
+    av: api.getCurrentUserID(),
+    fb_api_req_friendly_name:
+      "FriendingCometFriendRequestsRootQueryRelayPreloader",
+    fb_api_caller_class: "RelayModern",
+    doc_id: "4499164963466303",
+    variables: JSON.stringify({ input: { scale: 3 } }),
+  };
+  const listRequest = JSON.parse(
+    await api.httpPost("https://www.facebook.com/api/graphql/", form)
+  ).data.viewer.friending_possibilities.edges;
+  let msg = "";
+  let i = 0;
+  for (const user of listRequest) {
+    i++;
+    msg += `\n${i}. Name: ${user.node.name}
+        + \nID: ${user.node.id}
+        + \nUrl: ${user.node.url.replace("www.facebook", "fb")}
+        + \nTime: ${moment(user.time * 1009)
+          .tz("Asia/Manila")
+          .format("DD/MM/YYYY HH:mm:ss")}\n`;
+  }
+  const info = await output.reply(
+    `${msg}\nReply to this message with content: <add | del> <comparison | or "all"> to take action`
+  );
+  input.setReply(info.messageID, {
+    messageID: info.messageID,
+    listRequest,
+    author: event.senderID,
+    unsendTimeout: setTimeout(() => {
+      api.unsendMessage(info.messageID);
+    }, 60 * 1000),
+    callback: onReply,
+  });
+}
+// @ts-check
+
+/**
+ * @type {kennux.CommandMeta}
+ */
+export const meta = {
+  name: "active",
+  description: "Lists the top 10 most active users.",
+  author: "finn groseth",
+  version: "1.0.0",
+  noPrefix: "both",
+  permissions: [0, 1, 2],
+  waitingTime: 3,
+  requirement: "3.0.0",
+  icon: "⚡",
+  category: "User Management",
+};
+
+export class style {
+  title = "Most Active Users ⚡";
+  titleFont = "bold";
+  contentFont = "none";
+}
+
+/**
+ *
+ * @param {CommandContext} param0
+ */
+export async function entry({ output, input, money, Slicer, args }) {
+  const time = Date.now();
+
+  const allUsers = await money.getAll();
+
+  const sortedUsers = Object.keys(allUsers).sort((a, b) => {
+    allUsers[a] ??= {
+      money: 0,
+      battlePoints: 0,
+      exp: 0,
+    };
+    allUsers[b] ??= {
+      money: 0,
+      battlePoints: 0,
+      exp: 0,
+    };
+    const { lastModified: lastModifiedA = Date.now() } = allUsers[a];
+
+    const { lastModified: lastModifiedB = Date.now() } = allUsers[b];
+
+    return lastModifiedB - lastModifiedA;
+  });
+
+  let i = ((isNaN(parseInt(args[0])) ? 1 : parseInt(args[0])) - 1) * 10;
+  const slicer = new Slicer(sortedUsers, 10);
+
+  let result = `Top 10 Most Active Users: (${Date.now() - time}ms)\n\n`;
+
+  for (const userID of slicer.getPage(args[0])) {
+    i++;
+
+    const data = allUsers[userID];
+    const { lastModified = 0 } = data;
+    const lastActiveDate = new Date(lastModified).toLocaleDateString();
+    result += `${i}. **${data.name}**\n🕒 Last Active: **${lastActiveDate}**\n\n`;
+  }
+
+  output.reply(result + `\n\n${input.words[0]} <page> - View a specific page.`);
+}
+// @ts-check
+import { ReduxCMDHome } from "@kennux/redux-home";
+import { UNISpectra } from "@kennux/jeserth";
+export const meta = }
+  name: "admin",
+  author: "finn groseth 🎀",
+  noPrefix: false,
+  version: "1.0.4",
+  description: "Manage admins.",
+  usage: "admin[prop] [command]",
+  permissions: [0, 1, 2],
+  requirement: "3.0.0",
+  icon: "",
+  category: "User Management",
+};
+const { kennux } = global;
+export const style = {
+  title: "Admins 👑",
+  titleFont: "bold",
+  contentFont: "fancy",
+};
+
+/**
+ * @type {Record<string, CommandEntry>}
+ */
+export const entryConfig = {
+  async addmod({ input, output, args, money }) {
+    const { MODERATORBOT, ADMINBOT } = Cassidy.config;
+    if (!input.isAdmin) {
+      return output.reply(`❌ | You cannot add moderators.`);
+    }
+    const ID = input.detectID || args[0];
+    if (!ID) {
+      return output.reply(
+        "❌ | Please specify the ID to add. Either reply/mention or add the ID to args[0]."
+      );
+    }
+    const { name } = await money.getItem(ID);
+    if (MODERATORBOT.includes(ID)) {
+      return output.reply(`❌ | ${name} (${ID}) is already a moderator.`);
+    }
+    if (ADMINBOT.includes(ID)) {
+      return output.reply(`❌ | ${name} (${ID}) is an admin.`);
+    }
+
+    MODERATORBOT.push(ID);
+    kennux.config.MODERATORBOT = MODERATORBOT;
+    return output.reply(`✅ | ${name} (${ID}) is now a moderator.`);
+  },
+  async removemod({ input, output, args, money }) {
+    const { MODERATORBOT } = kennux.config;
+    if (!input.isAdmin) {
+      return output.reply(`❌ | You cannot remove moderators.`);
+    }
+    const ID = input.detectID || args[0];
+    if (!ID) {
+      return output.reply(
+        "❌ | Please specify the ID to remove. Either reply/mention or add the ID to args[0]."
+      );
+    }
+    if (ID.startsWith("web:") || ID.startsWith("wss:main")) {
+      return output.reply(`❌ | Web users and wss main cannot be moderator!`);
+    }
+
+    const { name } = await money.getItem(ID);
+    if (!MODERATORBOT.includes(ID)) {
+      return output.reply(`❌ | ${name} (${ID}) is not a moderator.`);
+    }
+    Cassidy.config.MODERATORBOT = MODERATORBOT.filter((item) => item !== ID);
+    return output.reply(`✅ | ${name} (${ID}) no longer a moderator.`);
+  },
+
+  async add({ input, output, args, money }) {
+    const { ADMINBOT } = kennux.config;
+    if (!input.isAdmin) {
+      return output.reply(`❌ | You cannot add admins.`);
+    }
+    const ID = input.detectID || args[0];
+    if (!ID) {
+      return output.reply(
+        "❌ | Please specify the ID to add. Either reply/mention or add the ID to args[0]."
+      );
+    }
+    if (ID.startsWith("web:") || ID.startsWith("wss:main")) {
+      return output.reply(`❌ | Web users and wss main cannot be admin!`);
+    }
+    const { name } = await money.getItem(ID);
+    if (ADMINBOT.includes(ID)) {
+      return output.reply(`❌ | ${name} (${ID}) is already an admin.`);
+    }
+    ADMINBOT.push(ID);
+    Cassidy.config.ADMINBOT = ADMINBOT;
+    return output.reply(`✅ | ${name} (${ID}) is now an admin.`);
+  },
+  async remove({ input, output, args, money }) {
+    const { ADMINBOT } = kennux.config;
+    if (!input.isAdmin) {
+      return output.reply(`❌ | You cannot remove admins.`);
+    }
+    const ID = input.detectID || args[0];
+    if (!ID) {
+      return output.reply(
+        "❌ | Please specify the ID to remove. Either reply/mention or add the ID to args[0]."
+      );
+    }
+    const { name } = await money.getItem(ID);
+    if (!ADMINBOT.includes(ID)) {
+      return output.reply(`❌ | ${name} (${ID}) is not an admin.`);
+    }
+    Cassidy.config.ADMINBOT = ADMINBOT.filter((item) => item !== ID);
+    return output.reply(`✅ | ${name} (${ID}) no longer an admin.`);
+  },
+  async list({ output, money }) {
+    const { ADMINBOT = [], MODERATORBOT = [] } = kennux.config;
+    const concat = [...MODERATORBOT, ...ADMINBOT
+    let result = `Total of ${concat.length} admins and moderators:\n\n`;
+    let n = 1;
+    result += `${kennux.arrow} 👑 ***Admins***:\n`;
+    const admins = await money.getItems(...ADMINBOT);
+    const mods = await money.getItems(...MODERATORBOT);
+
+    for (const [admin, { name }] of Object.entries(admins)) {
+      result += `${n}. **${name}** (${admin})\n`;
+      n++;
+    }
+    result += `\n${UNISpectra.arrow} 🛡️ ***Moderators***:\n`;
+    for (const [moderator, { name }] of Object.entries(mods)) {
+      result += `${n}. **${name}** (${moderator})\n`;
+      n++;
+    }
+    return output.reply(result);
+  },
+};
+
+const home = new ReduxCMDHome({
+  entryConfig,
+  entryInfo: {
+    list: {
+      description: "Display the list of admins",
+    },
+    addmod: {
+      description: "Grant moderator privileges",
+      args: ["<uid>"],
+    },
+    removemod: {
+      description: "Revoke moderator privileges",
+      args: ["<uid>"],
+    },
+    add: {
+      description: "Add a new admin",
+      args: ["<uid>"],
+    },
+    remove: {
+      description: "Remove an existing admin",
+      args: ["<uid>"],
+    },
+  },
+});
+
+export async function entry(ctx) {
+  return home.runInContext(ctx);
+}
+// @ts-check
+/**
+ * @type {kennux.CommandMeta}
+ */
+export const meta = {
+  name: "unsend",
+  otherNames: ["uns"],
+  version: "1.1.0",
+  author: "NTKhang // converted By MrkimstersDev",
+  permissions: [0],
+  category: "Utilities",
+  description: "Unsend bot's message",
+  usage: "Reply to the bot's message and call the command",
+};
+
+/**
+ *
+ * @param {CommandContext} param0
+ * @returns
+ */
+export async function entry({ output, input, api, replySystem }) {
+  if (!input.replier || input.replier.senderID !== api.getCurrentUserID()) {
+    return output.reply("❌ Please reply to a bot's message.");
+  }
+  if (replySystem.get(input.replier.messageID)) {
+    return output.reply(
+      "❌ This message has reply listener, you cannot unsend it."
+    );
+  }
+
+  try {
+    await output.unsend(input.replier.messageID);
+  } catch (error) {
+    await output.reply("❌ Failed to unsend the message. Please try again.");
+  }
+}
+// @ts-check
+import axios from "axios";
+
+/**
+ * @type {kennux.CommandMeta}
+ */
+export const meta = {
+  name: "tempmail",
+  author: "Hazeey | AkhiroDEV",
+  description: "Generate a tempmail",
+  usage: "tempmail gen",
+  version: "1.0.1",
+  params: [["gen", "inbox"]],
+  shopPrice: 100,
+  requirement: "3.0.0",
+  icon: "📩",
+  category: "Utilities",
+};
+
+/**
+ *
+ * @param {CommandContext} param0
+ */
+export async function entry({ api, event }) {
+  const args = event.body.split(/\s+/);
+  args.shift();
+
+  if (args[0] === "gen") {
+    try {
+      const response = await axios.get(
+        "https://haze-temp-getter-e8bcc9ade589.herokuapp.com/get"
+      );
+      const responseData = response.data;
+
+      if (Array.isArray(responseData)) {
+        let emails = responseData.map((obj) => "➤ " + obj.email).join("\n\n");
+        api.sendMessage(
+          `📩 𝐓𝐞𝐦𝐩𝐌𝐚𝐢𝐥\n\n✄┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n✉️ 𝙴𝚖𝚊𝚒𝚕𝚜:\n\n${emails}\n\n✄┈┈┈┈┈┈┈┈┈┈┈┈┈┈`,
+          event.threadID,
+          event.messageID
+        );
+      } else {
+        api.sendMessage(
+          "🚫 𝙸𝚗𝚟𝚊𝚕𝚒𝚍 𝚁𝚎𝚜𝚙𝚘𝚗𝚜𝚎 𝚏𝚘𝚛𝚖𝚊𝚝",
+          event.threadID,
+          event.messageID
+        );
+      }
+    } catch (error) {
+      console.error("🚫 𝙴𝚛𝚛𝚘𝚛", error);
+      api.sendMessage(
+        "🚫 𝙴𝚛𝚛𝚘𝚛 𝚘𝚌𝚌𝚞𝚛𝚎𝚍 𝚠𝚑𝚒𝚕𝚎 𝚏𝚎𝚝𝚌𝚑𝚒𝚗𝚐 𝚎𝚖𝚊𝚒𝚕𝚜.",
+        event.threadID,
+        event.messageID
+      );
+    }
+  } else if (args[0]?.toLowerCase() === "inbox" && args.length === 2) {
+    const email = args[1];
+    try {
+      const response = await axios.get(
+        `https://haze-temp-getter-e8bcc9ade589.herokuapp.com/get/${email}`
+      );
+      const inboxMessages = response.data;
+      let formattedMessages = inboxMessages
+        .map(
+          (message) =>
+            `👤 𝙵𝚛𝚘𝚖: ${message.from}\n📬 𝚂𝚞𝚋𝚓𝚎𝚌𝚝: ${message.subject}\n\n✄┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n💌 𝙼𝚊𝚒𝚕:\n\n${message.body}\n✄┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n\n𝙳𝚊𝚝𝚎: ${message.date}`
+        )
+        .join("\n\n");
+      api.sendMessage(
+        `📩 𝐈𝐧𝐛𝐨𝐱 𝐌𝐞𝐬𝐬𝐚𝐠𝐞𝐬 \n\n${formattedMessages}`,
+        event.threadID,
+        event.messageID
+      );
+    } catch (error) {
+      console.error("🚫 𝙴𝚛𝚛𝚘𝚛", error);
+      api.sendMessage("🚫 𝙰𝚗 𝚎𝚛𝚛𝚘𝚛 𝚘𝚌𝚌𝚞𝚛𝚎𝚍.", event.threadID, event.messageID);
+    }
+  } else {
+  }
+}
